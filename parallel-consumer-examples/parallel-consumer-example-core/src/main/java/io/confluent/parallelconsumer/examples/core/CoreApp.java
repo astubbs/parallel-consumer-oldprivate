@@ -19,6 +19,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import pl.tlinkowski.unij.api.UniLists;
 
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.confluent.parallelconsumer.ParallelConsumerOptions.ProcessingOrder.KEY;
 
@@ -41,6 +42,9 @@ public class CoreApp {
 
     ParallelStreamProcessor<String, String> parallelConsumer;
 
+    public AtomicInteger messagesProcessed = new AtomicInteger(0);
+    public AtomicInteger messagesProduced = new AtomicInteger(0);
+
     @SuppressWarnings("UnqualifiedFieldAccess")
     void run() {
         this.parallelConsumer = setupConsumer();
@@ -57,16 +61,19 @@ public class CoreApp {
         // tag::exampleSetup[]
         var options = ParallelConsumerOptions.builder()
                 .ordering(KEY) // <1>
-                .maxConcurrency(1000) // <2>
-                .maxUncommittedMessagesToHandlePerPartition(10000) // <3>
+//                .maxConcurrency(1000) // <2>
+//                .numberOfThreads(1000) // <2>
+//                .maxUncommittedMessagesToHandlePerPartition(100) // <3>
                 .build();
 
         Consumer<String, String> kafkaConsumer = getKafkaConsumer(); // <4>
-        if (!(kafkaConsumer instanceof MockConsumer)) {
-            kafkaConsumer.subscribe(UniLists.of(inputTopic)); // <5>
-        }
+//        if (!(kafkaConsumer instanceof MockConsumer)) {
+//            kafkaConsumer.subscribe(UniLists.of(inputTopic)); // <5>
+//        }
 
-        return ParallelStreamProcessor.createEosStreamProcessor(kafkaConsumer, getKafkaProducer(), options);
+        ParallelStreamProcessor<String, String> processor = ParallelStreamProcessor.createEosStreamProcessor(kafkaConsumer, getKafkaProducer(), options);
+        processor.subscribe(UniLists.of(inputTopic));
+        return processor;
         // end::exampleSetup[]
     }
 
@@ -82,11 +89,15 @@ public class CoreApp {
                     var result = processBrokerRecord(record);
                     ProducerRecord<String, String> produceRecord =
                             new ProducerRecord<>(outputTopic, "a-key", result.payload);
+
+                    messagesProcessed.incrementAndGet();
                     return UniLists.of(produceRecord);
-                }, consumeProduceResult ->
-                        log.info("Message {} saved to broker at offset {}",
-                                consumeProduceResult.getOut(),
-                                consumeProduceResult.getMeta().offset())
+                }, consumeProduceResult -> {
+                    messagesProduced.incrementAndGet();
+                    log.info("Message {} saved to broker at offset {}",
+                            consumeProduceResult.getOut(),
+                            consumeProduceResult.getMeta().offset());
+                }
         );
         // end::exampleProduce[]
     }
