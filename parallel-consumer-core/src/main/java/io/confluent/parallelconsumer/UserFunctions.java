@@ -1,32 +1,38 @@
 package io.confluent.parallelconsumer;
 
-import lombok.RequiredArgsConstructor;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.producer.ProducerRecord;
+import lombok.experimental.UtilityClass;
 
-import java.util.List;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
-@RequiredArgsConstructor
-public class UserFunction<A, B> implements Function<A, B> {
+@UtilityClass
+public class UserFunctions {
 
-    private final Function<A, B> wrappedFunction;
+    public static final String MSG = "Error occurred in code supplied by user";
 
-    public static <A, B> B apply(final Function<A, B> wrappedFunction, A a) {
+    public static <T, U, R> R carefullyRun(BiFunction<T, U, R> wrappedFunction, T t, U u) {
+        try {
+            return wrappedFunction.apply(t, u);
+        } catch (Exception e) {
+            throw new ErrorInUserFunctionException(MSG, e);
+        }
+    }
+
+    public static <A, B> B carefullyRun(Function<A, B> wrappedFunction, A a) {
         try {
             return wrappedFunction.apply(a);
         } catch (Exception e) {
-            throw new ErrorInUserFunctionException("Error occurred in code supplied by user", e);
+            throw new ErrorInUserFunctionException(MSG, e);
         }
-        return null;
     }
 
-    @Override
-    public B apply(final A a) {
+    public static <A> void carefullyRun(Consumer<A> wrappedFunction, A a) {
         try {
-            return wrappedFunction.apply(a);
+            wrappedFunction.accept(a);
         } catch (Exception e) {
-            throw new ErrorInUserFunctionException("Error occurred in code supplied by user", e);
+            throw new ErrorInUserFunctionException(MSG, e);
         }
     }
+
 }

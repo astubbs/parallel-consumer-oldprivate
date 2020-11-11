@@ -1,6 +1,7 @@
 package io.confluent.parallelconsumer;
 
-public class ErrorInUserFunctionException extends Throwable {
-    public ErrorInUserFunctionException(final String s) {
+public class ErrorInUserFunctionException extends RuntimeException {
+    public ErrorInUserFunctionException(final String message, final Throwable cause) {
+        super(message, cause);
     }
 }

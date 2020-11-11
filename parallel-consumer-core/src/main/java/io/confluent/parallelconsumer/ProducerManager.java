@@ -1,20 +1,21 @@
 package io.confluent.parallelconsumer;
 
 import io.confluent.TransactionState;
-import io.confluent.csid.utils.StringUtils;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.*;
+import org.apache.kafka.clients.producer.internals.TransactionManager;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 
+import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Future;
 
-import static io.confluent.csid.utils.StringUtils.isBlank;
 import static io.confluent.csid.utils.StringUtils.msg;
 
 @Slf4j
@@ -30,10 +31,16 @@ public class ProducerManager<K, V> extends AbstractOffsetCommitter<K, V> {
         this.producer = newProducer;
         this.options = options;
 
-        String transactionIdProp = options.getProducerConfig().getProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG);
+        initProducer(newProducer);
+    }
+
+    private void initProducer(final Producer<K, V> newProducer) {
+        boolean producerIsActuallyTransactional = getProducerIsTransactional(newProducer);
+//        String transactionIdProp = options.getProducerConfig().getProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG);
+//        boolean txIdSupplied = isBlank(transactionIdProp);
         if (options.isUsingTransactionalProducer()) {
-            if (isBlank(transactionIdProp)) {
-                throw new IllegalArgumentException("Producer needs a transaction id");
+            if (!producerIsActuallyTransactional) {
+                throw new IllegalArgumentException("Using non-transactional option, yet Producer doesn't have a transaction ID - Producer needs a transaction id");
             }
             try {
                 log.debug("Initialising producer transaction session...");
@@ -45,9 +52,26 @@ public class ProducerManager<K, V> extends AbstractOffsetCommitter<K, V> {
                 throw e;
             }
         } else {
-            if (!isBlank(transactionIdProp)) {
-                throw new IllegalArgumentException("Producer must not have a transaction id");
+            if (producerIsActuallyTransactional) {
+                throw new IllegalArgumentException("Not using transactional option, but Producer has a transaction ID - Producer must not have a transaction ID for this option");
             }
+        }
+    }
+
+    /**
+     * Nasty reflection but better than relying on user supplying their config
+     *
+     * @see ParallelEoSStreamProcessor#checkAutoCommitIsDisabled
+     */
+    @SneakyThrows
+    private boolean getProducerIsTransactional(final Producer<K, V> newProducer) {
+        Field coordinatorField = newProducer.getClass().getDeclaredField("transactionManager");
+        coordinatorField.setAccessible(true);
+        TransactionManager transactionManager = (TransactionManager) coordinatorField.get(newProducer);
+        if (transactionManager == null) {
+            return false;
+        } else {
+            return transactionManager.isTransactional();
         }
     }
 

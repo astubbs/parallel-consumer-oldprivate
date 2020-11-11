@@ -12,7 +12,6 @@ import org.apache.commons.lang3.RandomUtils;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -47,7 +46,7 @@ public class CoreApp {
 
     @SuppressWarnings("UnqualifiedFieldAccess")
     void run() {
-        this.parallelConsumer = setupConsumer();
+        this.parallelConsumer = setupParallelConsumer();
 
         // tag::example[]
         parallelConsumer.poll(record ->
@@ -57,24 +56,30 @@ public class CoreApp {
     }
 
     @SuppressWarnings({"FeatureEnvy", "MagicNumber"})
-    ParallelStreamProcessor<String, String> setupConsumer() {
+    ParallelStreamProcessor<String, String> setupParallelConsumer() {
         // tag::exampleSetup[]
-        var options = ParallelConsumerOptions.builder()
-                .ordering(KEY) // <1>
-//                .maxConcurrency(1000) // <2>
-//                .numberOfThreads(1000) // <2>
-//                .maxUncommittedMessagesToHandlePerPartition(100) // <3>
-                .build();
+        ParallelConsumerOptions options = getOptions();
 
         Consumer<String, String> kafkaConsumer = getKafkaConsumer(); // <4>
 //        if (!(kafkaConsumer instanceof MockConsumer)) {
 //            kafkaConsumer.subscribe(UniLists.of(inputTopic)); // <5>
 //        }
 
-        ParallelStreamProcessor<String, String> processor = ParallelStreamProcessor.createEosStreamProcessor(kafkaConsumer, getKafkaProducer(), options);
+        Producer<String, String> kafkaProducer = getKafkaProducer();
+        ParallelStreamProcessor<String, String> processor = ParallelStreamProcessor.createEosStreamProcessor(kafkaConsumer, kafkaProducer, options);
         processor.subscribe(UniLists.of(inputTopic));
         return processor;
         // end::exampleSetup[]
+    }
+
+    ParallelConsumerOptions getOptions() {
+        var options = ParallelConsumerOptions.builder()
+                .ordering(KEY) // <1>
+//                .maxConcurrency(1000) // <2>
+//                .numberOfThreads(1000) // <2>
+//                .maxUncommittedMessagesToHandlePerPartition(100) // <3>
+                .build();
+        return options;
     }
 
     void close() {
@@ -82,7 +87,7 @@ public class CoreApp {
     }
 
     void runPollAndProduce() {
-        this.parallelConsumer = setupConsumer();
+        this.parallelConsumer = setupParallelConsumer();
 
         // tag::exampleProduce[]
         this.parallelConsumer.pollAndProduce(record -> {

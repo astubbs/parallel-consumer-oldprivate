@@ -4,6 +4,7 @@ package io.confluent.parallelconsumer.examples.core;
  * Copyright (C) 2020 Confluent, Inc.
  */
 
+import io.confluent.parallelconsumer.ParallelConsumerOptions;
 import io.confluent.parallelconsumer.integrationTests.KafkaTest;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.Properties;
 
+import static io.confluent.parallelconsumer.ParallelConsumerOptions.ProcessingOrder.KEY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.waitAtMost;
 
@@ -29,7 +31,8 @@ public class Bug25AppTest extends KafkaTest<String, String> {
     @SneakyThrows
     @Test
     public void testTransactional() {
-        AppUnderTest coreApp = new AppUnderTest(true);
+        boolean tx = true;
+        AppUnderTest coreApp = new AppUnderTest(tx, ParallelConsumerOptions.builder().ordering(KEY).usingTransactionalProducer(tx).build());
 
         ensureTopic(coreApp.inputTopic, 1);
         ensureTopic(coreApp.outputTopic, 1);
@@ -57,7 +60,8 @@ public class Bug25AppTest extends KafkaTest<String, String> {
     @SneakyThrows
     @Test
     public void testNonTransactional() {
-        AppUnderTest coreApp = new AppUnderTest(false);
+        boolean tx = false;
+        AppUnderTest coreApp = new AppUnderTest(tx, ParallelConsumerOptions.builder().ordering(KEY).usingTransactionalProducer(tx).build());
 
         ensureTopic(coreApp.inputTopic, 1);
         ensureTopic(coreApp.outputTopic, 1);
@@ -86,18 +90,24 @@ public class Bug25AppTest extends KafkaTest<String, String> {
     class AppUnderTest extends CoreApp {
 
         final boolean tx;
+        final ParallelConsumerOptions options;
 
         @Override
         Consumer<String, String> getKafkaConsumer() {
             Properties props = kcu.props;
-            props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1); // Sometimes causes test to fail (default 500)
-            props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10000);
+//            props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1); // Sometimes causes test to fail (default 500)
+//            props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10000);
             return new KafkaConsumer<>(props);
         }
 
         @Override
         Producer<String, String> getKafkaProducer() {
             return kcu.createNewProducer(tx);
+        }
+
+        @Override
+        ParallelConsumerOptions getOptions() {
+            return options;
         }
     }
 }
