@@ -9,16 +9,18 @@ import org.apache.kafka.common.TopicPartition;
 
 import java.util.Map;
 
-import static io.confluent.csid.utils.StringUtils.msg;
-
 @Slf4j
 @RequiredArgsConstructor
-public abstract class OffsetCommitter<K, V> {
+public abstract class AbstractOffsetCommitter<K, V> implements OffsetCommitter<K, V> {
 
     protected final Consumer<K, V> consumer;
     protected final WorkManager<K, V> wm;
 
-    void commit() {
+    /**
+     * Get offsets from {@link WorkManager} that are ready to commit
+     */
+    @Override
+    public void commit() {
         log.trace("Loop: Find completed work to commit offsets");
         // todo shouldn't be removed until commit succeeds (there's no harm in committing the same offset twice)
         Map<TopicPartition, OffsetAndMetadata> offsetsToSend = wm.findCompletedEligibleOffsetsAndRemove();

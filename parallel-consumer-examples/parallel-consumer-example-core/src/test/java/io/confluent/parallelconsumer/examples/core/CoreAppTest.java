@@ -28,19 +28,18 @@ import static org.mockito.Mockito.when;
 @Slf4j
 public class CoreAppTest {
 
-    TopicPartition tp = new TopicPartition(CoreApp.inputTopic, 0);
-
     @SneakyThrows
     @Test
     public void test() {
         log.info("Test start");
         CoreAppUnderTest coreApp = new CoreAppUnderTest();
+        TopicPartition tp = new TopicPartition(coreApp.inputTopic, 0);
 
         coreApp.run();
 
-        coreApp.mockConsumer.addRecord(new ConsumerRecord(CoreApp.inputTopic, 0, 0, "a key 1", "a value"));
-        coreApp.mockConsumer.addRecord(new ConsumerRecord(CoreApp.inputTopic, 0, 1, "a key 2", "a value"));
-        coreApp.mockConsumer.addRecord(new ConsumerRecord(CoreApp.inputTopic, 0, 2, "a key 3", "a value"));
+        coreApp.mockConsumer.addRecord(new ConsumerRecord(coreApp.inputTopic, 0, 0, "a key 1", "a value"));
+        coreApp.mockConsumer.addRecord(new ConsumerRecord(coreApp.inputTopic, 0, 1, "a key 2", "a value"));
+        coreApp.mockConsumer.addRecord(new ConsumerRecord(coreApp.inputTopic, 0, 2, "a key 3", "a value"));
 
         Awaitility.await().pollInterval(Duration.ofSeconds(1)).untilAsserted(()->{
             Assertions.assertThat(coreApp.mockConsumer.position(tp)).isEqualTo(3);
@@ -55,12 +54,13 @@ public class CoreAppTest {
     public void testPollAndProduce() {
         log.info("Test start");
         CoreAppUnderTest coreApp = new CoreAppUnderTest();
+        TopicPartition tp = new TopicPartition(coreApp.inputTopic, 0);
 
         coreApp.runPollAndProduce();
 
-        coreApp.mockConsumer.addRecord(new ConsumerRecord(CoreApp.inputTopic, 0, 0, "a key 1", "a value"));
-        coreApp.mockConsumer.addRecord(new ConsumerRecord(CoreApp.inputTopic, 0, 1, "a key 2", "a value"));
-        coreApp.mockConsumer.addRecord(new ConsumerRecord(CoreApp.inputTopic, 0, 2, "a key 3", "a value"));
+        coreApp.mockConsumer.addRecord(new ConsumerRecord(coreApp.inputTopic, 0, 0, "a key 1", "a value"));
+        coreApp.mockConsumer.addRecord(new ConsumerRecord(coreApp.inputTopic, 0, 1, "a key 2", "a value"));
+        coreApp.mockConsumer.addRecord(new ConsumerRecord(coreApp.inputTopic, 0, 2, "a key 3", "a value"));
 
         Awaitility.await().pollInterval(Duration.ofSeconds(1)).untilAsserted(()->{
             Assertions.assertThat(coreApp.mockConsumer.position(tp)).isEqualTo(3);
@@ -72,6 +72,7 @@ public class CoreAppTest {
     class CoreAppUnderTest extends CoreApp {
 
         LongPollingMockConsumer<String, String> mockConsumer = Mockito.spy(new LongPollingMockConsumer<>(OffsetResetStrategy.EARLIEST));
+        TopicPartition tp = new TopicPartition(inputTopic, 0);
 
         @Override
         Consumer<String, String> getKafkaConsumer() {

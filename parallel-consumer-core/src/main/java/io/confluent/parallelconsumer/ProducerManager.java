@@ -38,15 +38,14 @@ public class ProducerManager<K, V> extends AbstractOffsetCommitter<K, V> {
             try {
                 log.debug("Initialising producer transaction session...");
                 producer.initTransactions();
+                producer.beginTransaction();
+                ts.setInTransaction();
             } catch (KafkaException e) {
                 log.error("Make sure your producer is setup for transactions - specifically make sure it's {} is set.", ProducerConfig.TRANSACTIONAL_ID_CONFIG, e);
                 throw e;
             }
-
-            producer.beginTransaction();
-            ts.setInTransaction();
         } else {
-            if (isBlank(transactionIdProp)) {
+            if (!isBlank(transactionIdProp)) {
                 throw new IllegalArgumentException("Producer must not have a transaction id");
             }
         }

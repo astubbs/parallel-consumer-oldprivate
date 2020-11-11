@@ -10,7 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.clients.consumer.internals.ConsumerCoordinator;
 import org.apache.kafka.clients.producer.*;
-import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.Time;
 import org.slf4j.MDC;
@@ -32,6 +31,7 @@ import static io.confluent.csid.utils.BackportUtils.isEmpty;
 import static io.confluent.csid.utils.BackportUtils.toSeconds;
 import static io.confluent.csid.utils.Range.range;
 import static io.confluent.csid.utils.StringUtils.msg;
+import static io.confluent.parallelconsumer.UserFunctions.carefullyRun;
 import static java.time.Duration.ofSeconds;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -256,7 +256,11 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
     public void poll(Consumer<ConsumerRecord<K, V>> usersVoidConsumptionFunction) {
         Function<ConsumerRecord<K, V>, List<Object>> wrappedUserFunc = (record) -> {
             log.trace("asyncPoll - Consumed a record ({}), executing void function...", record.offset());
+
             usersVoidConsumptionFunction.accept(record);
+            carefullyRun(usersVoidConsumptionFunction, record);
+
+
             return UniLists.of(); // user function returns no produce records, so we satisfy our api
         };
         Consumer<Object> voidCallBack = (ignore) -> log.trace("Void callback applied.");
@@ -269,7 +273,9 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
                                Consumer<ConsumeProduceResult<K, V, K, V>> callback) {
         // wrap user func to add produce function
         Function<ConsumerRecord<K, V>, List<ConsumeProduceResult<K, V, K, V>>> wrappedUserFunc = (consumedRecord) -> {
-            List<ProducerRecord<K, V>> recordListToProduce = userFunction.apply(consumedRecord);
+
+            List<ProducerRecord<K, V>> recordListToProduce = carefullyRun(userFunction, consumedRecord);
+
             if (recordListToProduce.isEmpty()) {
                 log.warn("No result returned from function to send.");
             }
@@ -302,7 +308,7 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
         } else {
             log.info("Signaling to close...");
 
-            switch (drainMode){
+            switch (drainMode) {
                 case DRAIN:
                     log.info("Will wait for all in flight to complete before");
                     transitionToDraining();
@@ -692,7 +698,7 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
             return intermediateResults;
         } catch (Exception e) {
             // handle fail
-            log.debug("Error in user function", e);
+            log.debug("Error processing record", e);
             wc.onUserFunctionFailure();
             addToMailbox(wc); // always add on error
             throw e; // trow again to make the future failed

@@ -5,6 +5,7 @@ package io.confluent.parallelconsumer.examples.core;
  */
 
 import io.confluent.parallelconsumer.integrationTests.KafkaTest;
+import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -27,18 +28,16 @@ public class Bug25AppTest extends KafkaTest<String, String> {
 
     @SneakyThrows
     @Test
-    public void test() {
-        log.info("Test start");
-        ensureTopic(CoreApp.inputTopic, 1);
-        ensureTopic(CoreApp.outputTopic, 1);
+    public void testTransactional() {
+        AppUnderTest coreApp = new AppUnderTest(true);
 
-
-        AppUnderTest coreApp = new AppUnderTest();
+        ensureTopic(coreApp.inputTopic, 1);
+        ensureTopic(coreApp.outputTopic, 1);
 
         log.info("Producing 1000 messages before starting application");
         try (Producer<String, String> kafkaProducer = kcu.createNewProducer(false)) {
             for (int i = 0; i < 1000; i++) {
-                kafkaProducer.send(new ProducerRecord<>(CoreApp.inputTopic, "key-" + i, "value-" + i));
+                kafkaProducer.send(new ProducerRecord<>(coreApp.inputTopic, "key-" + i, "value-" + i));
             }
         }
 
@@ -55,19 +54,50 @@ public class Bug25AppTest extends KafkaTest<String, String> {
         coreApp.close();
     }
 
+    @SneakyThrows
+    @Test
+    public void testNonTransactional() {
+        AppUnderTest coreApp = new AppUnderTest(false);
+
+        ensureTopic(coreApp.inputTopic, 1);
+        ensureTopic(coreApp.outputTopic, 1);
+
+        log.info("Producing 1000 messages before starting application");
+        try (Producer<String, String> kafkaProducer = kcu.createNewProducer(false)) {
+            for (int i = 0; i < 1000; i++) {
+                kafkaProducer.send(new ProducerRecord<>(coreApp.inputTopic, "key-" + i, "value-" + i));
+            }
+        }
+
+        log.info("Starting application...");
+        coreApp.runPollAndProduce();
+
+        waitAtMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            log.info("Processed-count: " + coreApp.messagesProcessed.get());
+            log.info("Produced-count: " + coreApp.messagesProduced.get());
+            assertThat(coreApp.messagesProcessed.get()).isEqualTo(1000);
+            assertThat(coreApp.messagesProduced.get()).isEqualTo(1000);
+        });
+
+        coreApp.close();
+    }
+
+    @RequiredArgsConstructor
     class AppUnderTest extends CoreApp {
+
+        final boolean tx;
 
         @Override
         Consumer<String, String> getKafkaConsumer() {
             Properties props = kcu.props;
-//            props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1); // Sometimes causes test to fail
+            props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1); // Sometimes causes test to fail (default 500)
             props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10000);
             return new KafkaConsumer<>(props);
         }
 
         @Override
         Producer<String, String> getKafkaProducer() {
-            return kcu.createNewProducer(true);
+            return kcu.createNewProducer(tx);
         }
     }
 }

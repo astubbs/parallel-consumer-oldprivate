@@ -10,6 +10,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.CreateTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.common.errors.TopicExistsException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +18,8 @@ import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 import pl.tlinkowski.unij.api.UniLists;
+
+import java.util.concurrent.ExecutionException;
 
 import static org.apache.commons.lang3.RandomUtils.nextInt;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,11 +74,16 @@ public abstract class KafkaTest<K, V> {
         ensureTopic(topic, numPartitions);
     }
 
-    @SneakyThrows
     protected void ensureTopic(String topic, int numPartitions) {
         NewTopic e1 = new NewTopic(topic, numPartitions, (short) 1);
         CreateTopicsResult topics = kcu.admin.createTopics(UniLists.of(e1));
-        Void all = topics.all().get();
+        try {
+            Void all = topics.all().get();
+        } catch (ExecutionException e) {
+            // fine
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
 }

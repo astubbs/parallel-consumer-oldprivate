@@ -29,8 +29,8 @@ import static io.confluent.parallelconsumer.ParallelConsumerOptions.ProcessingOr
 @Slf4j
 public class CoreApp {
 
-    static String inputTopic = "input-topic-" + RandomUtils.nextInt();
-    static String outputTopic = "output-topic-" + RandomUtils.nextInt();
+    String inputTopic = "input-topic-" + RandomUtils.nextInt();
+    String outputTopic = "output-topic-" + RandomUtils.nextInt();
 
     Consumer<String, String> getKafkaConsumer() {
         return new KafkaConsumer<>(new Properties());
