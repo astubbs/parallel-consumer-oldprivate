@@ -14,15 +14,18 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 @Slf4j
-public class ConsumerOffsetCommitter<K, V> extends AbstractOffsetCommitter<K, V> {
+public class ConsumerOffsetCommitter<K, V> extends AbstractOffsetCommitter<K, V> implements OffsetCommitter<K, V> {
 
     @Getter
     private final boolean isSync = false;
 
     private CountDownLatch commitBarrier = new CountDownLatch(1);
     CyclicBarrier b = new CyclicBarrier(2);
+    ReentrantLock lock = new ReentrantLock(false);
 
     public ConsumerOffsetCommitter(final Consumer<K, V> newConsumer, final WorkManager<K, V> newWorkManager) {
         super(newConsumer, newWorkManager);
@@ -54,6 +57,9 @@ public class ConsumerOffsetCommitter<K, V> extends AbstractOffsetCommitter<K, V>
 
     public CountDownLatch setupLock() {
         commitBarrier = new CountDownLatch(1);
+//        Condition commitFinished = lock.newCondition();
+//        commitFinished.signalAll();
+//        commitFinished.await();
         return commitBarrier;
     }
 }

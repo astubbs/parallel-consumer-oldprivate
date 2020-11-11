@@ -40,6 +40,10 @@ public class ParallelConsumerOptions {
     @Builder.Default
     private final ProcessingOrder ordering = ProcessingOrder.UNORDERED;
 
+    /**
+     * Must be set to true if being used with a transactional producer.
+     * // TODO we could just auto detect this from the Producers state. However, forcing it to be specified makes the choice more verbose?
+     */
     @Builder.Default
     private final boolean usingTransactionalProducer = false;
 
@@ -59,7 +63,8 @@ public class ParallelConsumerOptions {
     @Builder.Default
     private final int numberOfThreads = 16;
 
-    @Builder.Default
-    private final Properties producerConfig = new Properties();
+    //    using reflection instead
+//    @Builder.Default
+//    private final Properties producerConfig = new Properties();
 
 }
