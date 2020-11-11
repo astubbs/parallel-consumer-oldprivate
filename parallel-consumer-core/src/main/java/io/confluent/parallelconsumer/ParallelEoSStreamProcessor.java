@@ -42,6 +42,8 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 @Slf4j
 public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor<K, V>, ConsumerRebalanceListener, Closeable {
 
+    private final ParallelConsumerOptions options;
+
     /**
      * Injectable clock for testing
      */
@@ -54,9 +56,8 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
 
     private Instant lastCommit = Instant.now();
 
-    private boolean inTransaction = false;
+    final ProducerManager<K, V> producerManager;
 
-    private final org.apache.kafka.clients.producer.Producer<K, V> producer;
     private final org.apache.kafka.clients.consumer.Consumer<K, V> consumer;
 
     /**
@@ -95,6 +96,8 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
      */
     private final AtomicBoolean currentlyPollingWorkCompleteMailBox = new AtomicBoolean();
 
+    private final OffsetCommitter<K, V> committer;
+
     /**
      * The run state of the controller.
      *
@@ -124,36 +127,34 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
      */
     public ParallelEoSStreamProcessor(org.apache.kafka.clients.consumer.Consumer<K, V> consumer,
                                       org.apache.kafka.clients.producer.Producer<K, V> producer,
-                                      ParallelConsumerOptions options) {
+                                      ParallelConsumerOptions newOptions) {
         log.debug("Confluent async consumer initialise");
 
         Objects.requireNonNull(consumer);
         Objects.requireNonNull(producer);
-        Objects.requireNonNull(options);
+        Objects.requireNonNull(newOptions);
+
+        options = newOptions;
 
         checkNotSubscribed(consumer);
         checkAutoCommitIsDisabled(consumer);
 
-        //
-        this.producer = producer;
         this.consumer = consumer;
 
-        workerPool = Executors.newFixedThreadPool(options.getNumberOfThreads());
+        this.workerPool = Executors.newFixedThreadPool(newOptions.getNumberOfThreads());
 
-        //
-        this.wm = new WorkManager<>(options, consumer);
+        this.wm = new WorkManager<>(newOptions, consumer);
 
-        //
+        this.producerManager = new ProducerManager<>(producer, consumer, this.wm, options);
+
         this.brokerPollSubsystem = new BrokerPollSystem<>(consumer, wm, this);
 
-        //
-        try {
-            log.debug("Initialising producer transaction session...");
-            producer.initTransactions();
-        } catch (KafkaException e) {
-            log.error("Make sure your producer is setup for transactions - specifically make sure it's {} is set.", ProducerConfig.TRANSACTIONAL_ID_CONFIG, e);
-            throw e;
+        if (options.isUsingTransactionalProducer()) {
+            this.committer = this.producerManager;
+        } else {
+            this.committer = this.brokerPollSubsystem;
         }
+
     }
 
     private void checkNotSubscribed(org.apache.kafka.clients.consumer.Consumer<K, V> consumer) {
@@ -276,7 +277,7 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
 
             List<ConsumeProduceResult<K, V, K, V>> results = new ArrayList<>();
             for (ProducerRecord<K, V> toProduce : recordListToProduce) {
-                RecordMetadata produceResultMeta = produceMessage(toProduce);
+                RecordMetadata produceResultMeta = producerManager.produceMessage(toProduce);
                 var result = new ConsumeProduceResult<>(consumedRecord, toProduce, produceResultMeta);
                 results.add(result);
             }
@@ -284,30 +285,6 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
         };
 
         supervisorLoop(wrappedUserFunc, callback);
-    }
-
-    /**
-     * Produce a message back to the broker.
-     * <p>
-     * Implementation uses the blocking API, performance upgrade in later versions, is not an issue for the common use
-     * case ({@link #poll(Consumer)}).
-     *
-     * @see #pollAndProduce(Function, Consumer)
-     */
-    RecordMetadata produceMessage(ProducerRecord<K, V> outMsg) {
-        // only needed if not using tx
-        Callback callback = (RecordMetadata metadata, Exception exception) -> {
-            if (exception != null) {
-                log.error("Error producing result message", exception);
-                throw new RuntimeException("Error producing result message", exception);
-            }
-        };
-        Future<RecordMetadata> send = producer.send(outMsg, callback);
-        try {
-            return send.get();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
     }
 
     @Override
@@ -371,12 +348,7 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
         log.debug("Closing and waiting for broker poll system...");
         brokerPollSubsystem.closeAndWait();
 
-        log.debug("Closing producer, assuming no more in flight...");
-        if (this.inTransaction) {
-            // close started after tx began, but before work was done, otherwise a tx wouldn't have been started
-            producer.abortTransaction();
-        }
-        producer.close(timeout);
+        producerManager.close(timeout);
 
         log.debug("Shutting down execution pool...");
         List<Runnable> unfinished = workerPool.shutdownNow();
@@ -468,10 +440,6 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
         } else {
             state = running;
         }
-
-        //
-        producer.beginTransaction();
-        this.inTransaction = true;
 
         // run main pool loop in thread
         Callable<Boolean> controlTask = () -> {
@@ -653,61 +621,8 @@ public class ParallelEoSStreamProcessor<K, V> implements ParallelStreamProcessor
         return Duration.between(lastCommit, now);
     }
 
-    /**
-     * Get offsets from {@link WorkManager} that are ready to commit
-     */
     private void commitOffsetsThatAreReady() {
-        log.trace("Loop: Find completed work to commit offsets");
-        // todo shouldn't be removed until commit succeeds (there's no harm in committing the same offset twice)
-        Map<TopicPartition, OffsetAndMetadata> offsetsToSend = wm.findCompletedEligibleOffsetsAndRemove();
-        if (offsetsToSend.isEmpty()) {
-            log.trace("No offsets ready");
-        } else {
-            log.debug("Committing offsets for {} partition(s): {}", offsetsToSend.size(), offsetsToSend);
-            ConsumerGroupMetadata groupMetadata = consumer.groupMetadata();
-
-            producer.sendOffsetsToTransaction(offsetsToSend, groupMetadata);
-            // see {@link KafkaProducer#commit} this can be interrupted and is safe to retry
-            boolean notCommitted = true;
-            int retryCount = 0;
-            int arbitrarilyChosenLimitForArbitraryErrorSituation = 200;
-            Exception lastErrorSavedForRethrow = null;
-            while (notCommitted) {
-                if (retryCount > arbitrarilyChosenLimitForArbitraryErrorSituation) {
-                    String msg = msg("Retired too many times ({} > limit of {}), giving up. See error above.", retryCount, arbitrarilyChosenLimitForArbitraryErrorSituation);
-                    log.error(msg, lastErrorSavedForRethrow);
-                    throw new RuntimeException(msg, lastErrorSavedForRethrow);
-                }
-                try {
-                    if (producer instanceof MockProducer) {
-                        // see bug https://issues.apache.org/jira/browse/KAFKA-10382
-                        // KAFKA-10382 - MockProducer is not ThreadSafe, ideally it should be as the implementation it mocks is
-                        synchronized (producer) {
-                            producer.commitTransaction();
-                        }
-                    } else {
-                        producer.commitTransaction();
-                    }
-
-                    this.inTransaction = false;
-
-                    wm.onOffsetCommitSuccess(offsetsToSend);
-
-                    notCommitted = false;
-                    if (retryCount > 0) {
-                        log.warn("Commit success, but took {} tries.", retryCount);
-                    }
-                } catch (Exception e) {
-                    log.warn("Commit exception, will retry, have tried {} times (see KafkaProducer#commit)", retryCount, e);
-                    lastErrorSavedForRethrow = e;
-                    retryCount++;
-                }
-            }
-
-            // begin tx for next cycle
-            producer.beginTransaction();
-            this.inTransaction = true;
-        }
+        committer.commit();
     }
 
     protected void handleFutureResult(WorkContainer<K, V> wc) {

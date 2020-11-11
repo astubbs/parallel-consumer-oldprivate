@@ -7,6 +7,8 @@ package io.confluent.parallelconsumer;
 import lombok.Builder;
 import lombok.Getter;
 
+import java.util.Properties;
+
 /**
  * The options for the {@link ParallelEoSStreamProcessor} system.
  */
@@ -38,6 +40,9 @@ public class ParallelConsumerOptions {
     @Builder.Default
     private final ProcessingOrder ordering = ProcessingOrder.UNORDERED;
 
+    @Builder.Default
+    private final boolean usingTransactionalProducer = false;
+
     /**
      * Don't have more than this many uncommitted messages in process
      * TODO change this to per topic? global?
@@ -54,5 +59,7 @@ public class ParallelConsumerOptions {
     @Builder.Default
     private final int numberOfThreads = 16;
 
+    @Builder.Default
+    private final Properties producerConfig = new Properties();
 
 }

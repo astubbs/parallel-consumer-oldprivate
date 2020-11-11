@@ -16,10 +16,8 @@ import pl.tlinkowski.unij.api.UniMaps;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.confluent.csid.utils.BackportUtils.toSeconds;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -31,7 +29,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
  * @param <V>
  */
 @Slf4j
-public class BrokerPollSystem<K, V> {
+public class BrokerPollSystem<K, V> implements OffsetCommitter<K, V> {
 
     private final org.apache.kafka.clients.consumer.Consumer<K, V> consumer;
 
@@ -43,6 +41,8 @@ public class BrokerPollSystem<K, V> {
 
     private final ParallelEoSStreamProcessor<K, V> pc;
 
+    private final ConsumerOffsetCommitter committer;
+
     @Setter
     @Getter
     private static Duration longPollTimeout = Duration.ofMillis(2000);
@@ -53,6 +53,8 @@ public class BrokerPollSystem<K, V> {
         this.consumer = consumer;
         this.wm = wm;
         this.pc = pc;
+
+        committer = new ConsumerOffsetCommitter<K, V>(consumer, wm);
     }
 
     public void start() {
@@ -76,6 +78,8 @@ public class BrokerPollSystem<K, V> {
                 // notify control work has been registered
                 pc.notifyNewWorkRegistered();
             }
+
+            maybeDoCommit();
 
             switch (state) {
                 case draining -> {
@@ -151,7 +155,7 @@ public class BrokerPollSystem<K, V> {
             log.debug("Wait for loop to finish ending...");
             Future<Boolean> pollControlResult = pollControlThreadFuture.get();
             boolean interrupted = true;
-            while(interrupted) {
+            while (interrupted) {
                 try {
                     Boolean pollShutdownSuccess = pollControlResult.get(DrainingCloseable.DEFAULT_TIMEOUT.toMillis(), MILLISECONDS);
                     interrupted = false;
@@ -204,4 +208,34 @@ public class BrokerPollSystem<K, V> {
     private boolean shouldThrottle() {
         return wm.shouldThrottle();
     }
+
+    private final AtomicBoolean commitRequested = new AtomicBoolean(false);
+
+    /**
+     * Optionally blocks. Threadsafe
+     */
+    @Override
+    public void commit() {
+        if (committer.isSync()) {
+            committer.setupLock();
+        }
+
+        commitRequested.set(true);
+        consumer.wakeup();
+
+        if (committer.isSync()) {
+            // block, wait for result
+            committer.waitForCommit();
+        } else {
+            // we just request the commit and hope
+        }
+    }
+
+    private void maybeDoCommit() {
+        if (commitRequested.get()) {
+            committer.commit();
+            commitRequested.set(false);
+        }
+    }
+
 }

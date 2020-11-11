@@ -12,4 +12,9 @@ public class StringUtils {
         String message = MessageFormatter.basicArrayFormat(s, args);
         return message;
     }
+
+    public static boolean isBlank(final String property) {
+        if (property == null) return true;
+        else return property.isBlank();
+    }
 }

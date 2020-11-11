@@ -19,6 +19,9 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.Properties;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.waitAtMost;
+
 @Slf4j
 public class Bug25AppTest extends KafkaTest<String, String> {
 
@@ -42,11 +45,11 @@ public class Bug25AppTest extends KafkaTest<String, String> {
         log.info("Starting application...");
         coreApp.runPollAndProduce();
 
-        Awaitility.waitAtMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+        waitAtMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             log.info("Processed-count: " + coreApp.messagesProcessed.get());
             log.info("Produced-count: " + coreApp.messagesProduced.get());
-            Assertions.assertThat(coreApp.messagesProcessed.get()).isEqualTo(1000);
-            Assertions.assertThat(coreApp.messagesProduced.get()).isEqualTo(1000);
+            assertThat(coreApp.messagesProcessed.get()).isEqualTo(1000);
+            assertThat(coreApp.messagesProduced.get()).isEqualTo(1000);
         });
 
         coreApp.close();

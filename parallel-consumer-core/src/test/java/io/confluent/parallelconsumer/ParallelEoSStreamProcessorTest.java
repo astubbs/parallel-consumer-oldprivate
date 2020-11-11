@@ -342,7 +342,7 @@ public class ParallelEoSStreamProcessorTest extends ParallelEoSStreamProcessorTe
     @Test
     public void testProducerStep() {
         ProducerRecord<String, String> outMsg = new ProducerRecord(OUTPUT_TOPIC, "");
-        RecordMetadata prodResult = parallelConsumer.produceMessage(outMsg);
+        RecordMetadata prodResult = parallelConsumer.producerManager.produceMessage(outMsg);
         assertThat(prodResult).isNotNull();
 
         List<ProducerRecord<String, String>> history = producerSpy.history();
